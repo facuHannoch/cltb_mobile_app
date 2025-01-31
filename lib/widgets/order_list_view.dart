@@ -1,10 +1,11 @@
 // File: lib/src/widgets/order_list_view.dart
 
-import 'package:cltb_mobile_app/models/buy_order.dart';
+import 'package:cltb_mobile_app/models/cex_order_data.dart';
+import 'package:cltb_mobile_app/widgets/price_text_field.dart';
+import 'package:cltb_mobile_app/widgets/ticker_text_field.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fluttertoast/fluttertoast.dart';
-import '../models/cex_order.dart';
 import '../utils/validators.dart';
 
 /// A reusable widget that manages a dynamic list of buy orders within the CEXOrderForm.
@@ -13,14 +14,14 @@ import '../utils/validators.dart';
 /// - [buyOrders]: The current list of BuyOrder objects to display.
 /// - [onBuyOrdersChanged]: Callback function triggered when the buyOrders list is modified.
 class OrderListView extends ConsumerStatefulWidget {
-  final List<BuyOrder> buyOrders;
-  final Function(List<BuyOrder>) onBuyOrdersChanged;
+  final List<CEXOrderData> buyOrders;
+  final Function(List<CEXOrderData>) onBuyOrdersChanged;
 
   const OrderListView({
-    Key? key,
+    super.key,
     required this.buyOrders,
     required this.onBuyOrdersChanged,
-  }) : super(key: key);
+  });
 
   @override
   _OrderListViewState createState() => _OrderListViewState();
@@ -72,12 +73,9 @@ class _OrderListViewState extends ConsumerState<OrderListView> {
   void _addBuyOrder() {
     setState(() {
       widget.buyOrders.add(
-        BuyOrder(
-          price: null,
-          quoteTokenTotal: 0.0,
+        CEXOrderData(
           orderType: 'limit',
-          orderId: '',
-          size: 0.0,
+          side: 'buy',
         ),
       );
       widget.onBuyOrdersChanged(widget.buyOrders);
@@ -95,7 +93,7 @@ class _OrderListViewState extends ConsumerState<OrderListView> {
   }
 
   /// Updates the BuyOrder at the specified index with the provided updatedOrder.
-  void _updateBuyOrder(int index, BuyOrder updatedOrder) {
+  void _updateBuyOrder(int index, CEXOrderData updatedOrder) {
     setState(() {
       widget.buyOrders[index] = updatedOrder;
       widget.onBuyOrdersChanged(widget.buyOrders);
@@ -110,9 +108,9 @@ class _OrderListViewState extends ConsumerState<OrderListView> {
 /// - [onRemove]: Callback function triggered when the order is to be removed.
 /// - [onUpdate]: Callback function triggered when the order is updated.
 class BuyOrderItem extends StatefulWidget {
-  final BuyOrder buyOrder;
+  final CEXOrderData buyOrder;
   final VoidCallback onRemove;
-  final Function(BuyOrder) onUpdate;
+  final Function(CEXOrderData) onUpdate;
 
   const BuyOrderItem({
     Key? key,
@@ -132,7 +130,13 @@ class _BuyOrderItemState extends State<BuyOrderItem> {
   late TextEditingController _quoteTokenTotalController;
   late TextEditingController _orderIdController;
   late TextEditingController _sizeController;
+
+  // New Controllers and Variables
+  late TextEditingController _tokenController;
+  late TextEditingController _quoteTokenController;
+  late TextEditingController _timeInForceController;
   String _orderType = 'limit';
+  String _side = 'buy'; // Default value
 
   @override
   void initState() {
@@ -141,8 +145,16 @@ class _BuyOrderItemState extends State<BuyOrderItem> {
     _quoteTokenTotalController = TextEditingController();
     _orderIdController = TextEditingController();
     _sizeController = TextEditingController();
-    _orderType = widget.buyOrder.orderType;
 
+    // Initialize new controllers
+    _tokenController = TextEditingController();
+    _quoteTokenController = TextEditingController();
+    _timeInForceController = TextEditingController();
+
+    _orderType = widget.buyOrder.orderType;
+    _side = widget.buyOrder.side ?? 'buy'; // Default to 'buy' if null
+
+    // Populate controllers with existing data if available
     if (widget.buyOrder.price != null) {
       _priceController.text = widget.buyOrder.price!.toStringAsFixed(4);
       _quoteTokenTotalController.text =
@@ -151,6 +163,9 @@ class _BuyOrderItemState extends State<BuyOrderItem> {
         _orderIdController.text = widget.buyOrder.orderId!;
       }
       _sizeController.text = widget.buyOrder.size?.toStringAsFixed(4) ?? '';
+      _tokenController.text = widget.buyOrder.token ?? '';
+      _quoteTokenController.text = widget.buyOrder.quoteToken ?? '';
+      _timeInForceController.text = widget.buyOrder.timeInForce ?? '';
     }
   }
 
@@ -160,25 +175,39 @@ class _BuyOrderItemState extends State<BuyOrderItem> {
     _quoteTokenTotalController.dispose();
     _orderIdController.dispose();
     _sizeController.dispose();
+
+    // Dispose new controllers
+    _tokenController.dispose();
+    _quoteTokenController.dispose();
+    _timeInForceController.dispose();
+
     super.dispose();
   }
 
   /// Validates the form and updates the BuyOrder if valid.
   void _validateAndSave() {
-    if (double.tryParse(_quoteTokenTotalController.text) ==
-        double.tryParse(_sizeController.text)) {
+    // Custom validation: Either Quote token total or size must be set, but not both
+    if ((double.tryParse(_quoteTokenTotalController.text) != null) &&
+        (double.tryParse(_sizeController.text) != null)) {
       Fluttertoast.showToast(
-          msg: 'Either Quote token total or size must be set');
+          msg: 'Either Quote token total or size must be set, not both.');
       return;
     }
+
     if (_formKey.currentState?.validate() ?? false) {
       _formKey.currentState?.save();
-      BuyOrder updatedOrder = BuyOrder(
+      CEXOrderData updatedOrder = CEXOrderData(
         price: double.parse(_priceController.text),
         quoteTokenTotal: double.tryParse(_quoteTokenTotalController.text),
+        token: _tokenController.text,
+        quoteToken: _quoteTokenController.text,
         orderType: _orderType,
         orderId:
             _orderIdController.text.isNotEmpty ? _orderIdController.text : null,
+        side: _side,
+        timeInForce: _timeInForceController.text.isNotEmpty
+            ? _timeInForceController.text
+            : null, // Allow timeInForce to be null
         size: double.tryParse(_sizeController.text),
       );
       widget.onUpdate(updatedOrder);
@@ -206,7 +235,7 @@ class _BuyOrderItemState extends State<BuyOrderItem> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'Order ${widget.buyOrder.orderId?.isNotEmpty ?? true ? widget.buyOrder.orderId : ''}',
+                    'Order ${widget.buyOrder.orderId?.isNotEmpty == true ? widget.buyOrder.orderId : ''}',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
@@ -220,17 +249,18 @@ class _BuyOrderItemState extends State<BuyOrderItem> {
               ),
               SizedBox(height: 16),
               // Price Field
-              TextFormField(
+              PriceTextField(
                 controller: _priceController,
-                decoration: InputDecoration(
-                  labelText: 'Price',
-                  border: OutlineInputBorder(),
-                ),
+                labelText: 'Order price',
+                // decoration: InputDecoration(
+                //   labelText: 'Price',
+                //   border: OutlineInputBorder(),
+                // ),
                 keyboardType: TextInputType.numberWithOptions(decimal: true),
                 validator: validatePrice,
                 onSaved: (value) {
                   // Price is already handled by the controller
-                },
+                },                
               ),
               SizedBox(height: 16),
               // Quote Token Total Field
@@ -247,12 +277,13 @@ class _BuyOrderItemState extends State<BuyOrderItem> {
                 },
               ),
               SizedBox(height: 16),
-              // Order Type Dropdown
+              // Dropdown and Additional Fields within ExpansionTile
               ExpansionTile(
                 title: Text("Extra configuration"),
                 maintainState: true,
                 children: [
                   SizedBox(height: 8),
+                  // Order Type Dropdown
                   DropdownButtonFormField<String>(
                     value: _orderType,
                     decoration: InputDecoration(
@@ -281,6 +312,43 @@ class _BuyOrderItemState extends State<BuyOrderItem> {
                     },
                   ),
                   SizedBox(height: 16),
+                  // Token Field using TickerTextField
+                  TickerTextField(
+                    controller: _tokenController,
+                    labelText: 'Token',
+                    // validator: (value) {
+                    //   if (value == null || value.isEmpty) {
+                    //     return 'Please enter a token.';
+                    //   }
+                    //   return null;
+                    // },
+                    // onChanged: (value) {
+                    //   _validateAndSave();
+                    // },
+                  ),
+                  SizedBox(height: 16),
+                  // Quote Token Field using TickerTextField
+                  TickerTextField(
+                    controller: _quoteTokenController,
+                    labelText: 'Quote Token',
+                  ),
+                  SizedBox(height: 16),
+                  // Size Field
+                  TextFormField(
+                    controller: _sizeController,
+                    decoration: InputDecoration(
+                      labelText: 'Size',
+                      border: OutlineInputBorder(),
+                    ),
+                    keyboardType:
+                        TextInputType.numberWithOptions(decimal: true),
+                    // Uncomment and define validateSize if needed
+                    // validator: validateSize,
+                    onSaved: (value) {
+                      // Size is already handled by the controller
+                    },
+                  ),
+                  SizedBox(height: 16),
                   // Order ID Field
                   TextFormField(
                     controller: _orderIdController,
@@ -297,18 +365,67 @@ class _BuyOrderItemState extends State<BuyOrderItem> {
                     },
                   ),
                   SizedBox(height: 16),
-                  // Size Field
-                  TextFormField(
-                    controller: _sizeController,
+                  // Side Dropdown ('buy' or 'sell')
+                  DropdownButtonFormField<String>(
+                    value: _side,
                     decoration: InputDecoration(
-                      labelText: 'Size',
+                      labelText: 'Side',
                       border: OutlineInputBorder(),
                     ),
-                    keyboardType:
-                        TextInputType.numberWithOptions(decimal: true),
-                    // validator: validateSize,
+                    items: ['buy', 'sell']
+                        .map((side) => DropdownMenuItem<String>(
+                              value: side,
+                              child: Text(side.capitalize()),
+                            ))
+                        .toList(),
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() {
+                          _side = value;
+                        });
+                        _validateAndSave();
+                      }
+                    },
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please select a side.';
+                      }
+                      return null;
+                    },
+                  ),
+                  SizedBox(height: 16),
+                  // Time In Force Field (Now Nullable)
+                  TextFormField(
+                    controller: _timeInForceController,
+                    decoration: InputDecoration(
+                      labelText: 'Time In Force',
+                      border: OutlineInputBorder(),
+                      hintText: 'Optional', // Indicate that it's optional
+                    ),
+                    onChanged: (value) {
+                      _validateAndSave();
+                    },
+                    validator: (value) {
+                      // Removed validation to allow null
+                      return null;
+                    },
                     onSaved: (value) {
-                      // Size is already handled by the controller
+                      // Time In Force is already handled by the controller
+                    },
+                  ),
+                  SizedBox(height: 16),
+                  // Trigger Time Field (TODO)
+                  TextFormField(
+                    decoration: InputDecoration(
+                      labelText: 'Trigger Time',
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (value) {
+                      // TODO: Implement Trigger Time functionality
+                    },
+                    validator: (value) {
+                      // No validation as it's a TODO
+                      return null;
                     },
                   ),
                   SizedBox(height: 16),
@@ -325,7 +442,7 @@ class _BuyOrderItemState extends State<BuyOrderItem> {
 /// Extension method on String to capitalize the first letter.
 extension StringCasingExtension on String {
   String capitalize() {
-    if (this.length == 0) return this;
+    if (this.isEmpty) return this;
     return '${this[0].toUpperCase()}${this.substring(1)}';
   }
 }

@@ -1,6 +1,6 @@
 // File: lib/src/widgets/order_form.dart
 
-import 'package:cltb_mobile_app/models/buy_order.dart';
+import 'package:cltb_mobile_app/models/cex_order_data.dart';
 import 'package:cltb_mobile_app/utils/time_utils.dart';
 import 'package:cltb_mobile_app/widgets/ticker_text_field.dart';
 import 'package:flutter/material.dart';
@@ -8,7 +8,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import '../models/cex_order.dart';
 import '../models/dex_order.dart';
-import '../providers/orders_provider.dart';
 import '../utils/validators.dart';
 import 'custom_dropdown.dart';
 import 'order_list_view.dart';
@@ -23,39 +22,59 @@ class CEXOrderForm extends ConsumerStatefulWidget {
   final bool includeExtraConfig;
 
   const CEXOrderForm({
-    Key? key,
+    super.key,
     required this.onSubmit,
     this.includeExtraConfig = false,
-  }) : super(key: key);
+  });
 
   @override
-  _CEXOrderFormState createState() => _CEXOrderFormState();
+  CEXOrderFormState createState() => CEXOrderFormState();
 }
 
-class _CEXOrderFormState extends ConsumerState<CEXOrderForm> {
+class CEXOrderFormState extends ConsumerState<CEXOrderForm> {
   final _formKey = GlobalKey<FormState>();
 
   // Form fields
-  // String _ticker = '';
   String _exchange = 'gateio';
   String _customExchange = '';
   DateTime _launchDate = DateTime.now().toUtc();
   TimeOfDay _launchTime = TimeOfDay.now();
-  List<BuyOrder> _buyOrders = [];
+  List<CEXOrderData> _buyOrders = [];
+
   // Extra configuration fields
   String _quoteToken = '';
-  double _profitsThreshold = 0.0;
-  double _profitsTakePercent = 0.0;
-  double _usdAllocation = 0.0;
-  double _maxTokenMarketPrice = 0.0;
+  double? _profitsThreshold;
+  double? _profitsTakePercent;
+  double? _usdAllocation;
+  double? _maxTokenMarketPrice;
+
+  // New Fields: Orders Processing Mode and Logs Policy
+  OrdersProcessingMode _ordersProcessingMode = OrdersProcessingMode.BATCH;
+  LogsPolicy _logsPolicy = LogsPolicy.FULL_LOGS;
+
+  // Combined UTC DateTime
+  DateTime _selectedUTCTime = DateTime.now().toUtc();
 
   @override
   void initState() {
     super.initState();
-    // _buyOrders.add(); // TODO: Add default orders
     _launchDate = getDefaultLaunchDate();
     _launchTime =
         TimeOfDay.fromDateTime(roundTimeToNearestHour(DateTime.now().toUtc()));
+    _updateSelectedUTCTime();
+  }
+
+  /// Updates the combined UTC DateTime based on _launchDate and _launchTime.
+  void _updateSelectedUTCTime() {
+    setState(() {
+      _selectedUTCTime = DateTime.utc(
+        _launchDate.year,
+        _launchDate.month,
+        _launchDate.day,
+        _launchTime.hour,
+        _launchTime.minute,
+      );
+    });
   }
 
   /// Validates the form and returns true if valid, else false.
@@ -67,31 +86,22 @@ class _CEXOrderFormState extends ConsumerState<CEXOrderForm> {
   void _handleSubmit() {
     if (_validateForm()) {
       _formKey.currentState?.save();
-      final now = DateTime.now();
-      final launchTime = DateTime(
-        _launchDate.year,
-        _launchDate.month,
-        _launchDate.day,
-        _launchTime.hour,
-        _launchTime.minute,
-        0,  // second
-        0   // millisecond
-      );
-      // TODO: fix things with times
 
       // Construct CEXOrder object
       CEXOrder order = CEXOrder(
         ticker: _tickerController.text,
         exchange: _exchange == 'Other' ? _customExchange : _exchange,
-        // launchDate: _launchDate,
-        launchTime: launchTime,
+        launchTime: _selectedUTCTime,
         buyOrders: _buyOrders,
         // Extra configuration
-        quoteToken: _quoteToken,
+        quoteToken: _quoteToken.isNotEmpty ? _quoteToken : null,
         profitsThreshold: _profitsThreshold,
         profitsTakePercent: _profitsTakePercent,
         usdAllocation: _usdAllocation,
         maxTokenMarketPrice: _maxTokenMarketPrice,
+        // New Fields
+        ordersProcessingMode: _ordersProcessingMode,
+        logsPolicy: _logsPolicy,
       );
 
       // Invoke the callback with the constructed order
@@ -101,7 +111,7 @@ class _CEXOrderFormState extends ConsumerState<CEXOrderForm> {
     }
   }
 
-  TextEditingController _tickerController = TextEditingController();
+  final TextEditingController _tickerController = TextEditingController();
 
   @override
   Widget build(BuildContext context) {
@@ -136,6 +146,8 @@ class _CEXOrderFormState extends ConsumerState<CEXOrderForm> {
                 Expanded(
                   child: GestureDetector(
                     onTap: () async {
+                      FocusScope.of(context)
+                          .unfocus(); // Unfocus any focused widget
                       DateTime? picked = await showDatePicker(
                         context: context,
                         initialDate: _launchDate,
@@ -144,8 +156,9 @@ class _CEXOrderFormState extends ConsumerState<CEXOrderForm> {
                       );
                       if (picked != null) {
                         setState(() {
-                          _launchDate = picked;
+                          _launchDate = picked.toUtc();
                         });
+                        _updateSelectedUTCTime();
                       }
                     },
                     child: AbsorbPointer(
@@ -164,6 +177,8 @@ class _CEXOrderFormState extends ConsumerState<CEXOrderForm> {
                 Expanded(
                   child: GestureDetector(
                     onTap: () async {
+                      FocusScope.of(context)
+                          .unfocus(); // Unfocus any focused widget
                       TimeOfDay? picked = await showTimePicker(
                         context: context,
                         initialTime: _launchTime,
@@ -172,6 +187,7 @@ class _CEXOrderFormState extends ConsumerState<CEXOrderForm> {
                         setState(() {
                           _launchTime = picked;
                         });
+                        _updateSelectedUTCTime();
                       }
                     },
                     child: AbsorbPointer(
@@ -193,8 +209,12 @@ class _CEXOrderFormState extends ConsumerState<CEXOrderForm> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Local Time: ${getCurrentLocalTimeString()}'),
-                Text('UTC Time: ${getCurrentUtcTimeString()}'),
+                Text(
+                  'Local Time: ${formatTime(_selectedUTCTime.toLocal())}',
+                ),
+                Text(
+                  'UTC Time: ${formatTime(_selectedUTCTime)}',
+                ),
               ],
             ),
             SizedBox(height: 16),
@@ -242,6 +262,63 @@ class _CEXOrderFormState extends ConsumerState<CEXOrderForm> {
                   });
                 },
               ),
+            SizedBox(height: 16),
+            // **New Fields: Orders Processing Mode and Logs Policy**
+            // Orders Processing Mode Dropdown
+            DropdownButtonFormField<OrdersProcessingMode>(
+              decoration: InputDecoration(
+                labelText: 'Orders Processing Mode',
+                border: OutlineInputBorder(),
+              ),
+              value: _ordersProcessingMode,
+              items: OrdersProcessingMode.values.map((mode) {
+                return DropdownMenuItem(
+                  value: mode,
+                  child: Text(mode.value),
+                );
+              }).toList(),
+              onChanged: (OrdersProcessingMode? newValue) {
+                if (newValue != null) {
+                  setState(() {
+                    _ordersProcessingMode = newValue;
+                  });
+                }
+              },
+              validator: (value) {
+                if (value == null) {
+                  return 'Please select an orders processing mode';
+                }
+                return null;
+              },
+            ),
+            SizedBox(height: 16),
+            // Logs Policy Dropdown
+            DropdownButtonFormField<LogsPolicy>(
+              decoration: InputDecoration(
+                labelText: 'Logs Policy',
+                border: OutlineInputBorder(),
+              ),
+              value: _logsPolicy,
+              items: LogsPolicy.values.map((policy) {
+                return DropdownMenuItem(
+                  value: policy,
+                  child: Text(policy.value.replaceAll('_', ' ')),
+                );
+              }).toList(),
+              onChanged: (LogsPolicy? newValue) {
+                if (newValue != null) {
+                  setState(() {
+                    _logsPolicy = newValue;
+                  });
+                }
+              },
+              validator: (value) {
+                if (value == null) {
+                  return 'Please select a logs policy';
+                }
+                return null;
+              },
+            ),
             SizedBox(height: 24),
             // Submit Button
             ElevatedButton(
@@ -262,15 +339,15 @@ class DEXOrderForm extends ConsumerStatefulWidget {
   final Function(DEXOrder) onSubmit;
 
   const DEXOrderForm({
-    Key? key,
+    super.key,
     required this.onSubmit,
-  }) : super(key: key);
+  });
 
   @override
-  _DEXOrderFormState createState() => _DEXOrderFormState();
+  DEXOrderFormState createState() => DEXOrderFormState();
 }
 
-class _DEXOrderFormState extends ConsumerState<DEXOrderForm> {
+class DEXOrderFormState extends ConsumerState<DEXOrderForm> {
   final _formKey = GlobalKey<FormState>();
 
   // Form fields
@@ -293,7 +370,6 @@ class _DEXOrderFormState extends ConsumerState<DEXOrderForm> {
 
   /// Handles the form submission process.
   void _handleSubmit() {
-    print("Hallo");
     if (_validateForm()) {
       _formKey.currentState?.save();
 
@@ -361,11 +437,7 @@ class _DEXOrderFormState extends ConsumerState<DEXOrderForm> {
           // Submit Button
           ElevatedButton(
             onPressed: _handleSubmit,
-            style: ButtonStyle(
-
-
-    ),
-
+            style: ButtonStyle(),
             child: Text('Submit DEX Order'),
           ),
         ],
